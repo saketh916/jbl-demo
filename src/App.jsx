@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
-import { useChat } from '@koreai/artemis-web-sdk/react';
+import { useAgent, useChat } from '@koreai/artemis-web-sdk/react';
 import MessageRender, { parseContent } from './MessageRender';
 import './App.css';
 
@@ -21,9 +21,13 @@ function findCurrentProduct(list) {
 
 export default function App() {
   const { messages, isTyping, sendMessage, isConnected } = useChat();
+  const { sdk } = useAgent();
   const [open, setOpen] = useState(false);
   const [input, setInput] = useState('');
   const [localMessages, setLocalMessages] = useState([]);
+  const [hiddenMessageIds, setHiddenMessageIds] = useState(() => new Set());
+  const [isRestarting, setIsRestarting] = useState(false);
+  const [sessionError, setSessionError] = useState('');
   const [showGreeting, setShowGreeting] = useState(true);
   const [everOpened, setEverOpened] = useState(false);
   const bottomRef = useRef(null);
@@ -31,6 +35,7 @@ export default function App() {
 
   let welcomeSeen = false;
   const allMessages = [...messages, ...localMessages]
+    .filter((m) => !hiddenMessageIds.has(m.id))
     .sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp))
     .filter((m) => {
       if (m.role !== 'assistant') return true;
@@ -82,6 +87,44 @@ export default function App() {
     await sendMessage(outgoing);
   }
 
+  async function startNewChat() {
+    if (!sdk || isRestarting) return;
+
+    const previousSessionId = sdk.getSessionId();
+    setHiddenMessageIds((previous) => new Set([
+      ...previous,
+      ...messages.map((message) => message.id),
+      ...localMessages.map((message) => message.id),
+    ]));
+    setIsRestarting(true);
+    setSessionError('');
+    try {
+      if (sdk.isConnected()) {
+        const disconnected = new Promise((resolve) => {
+          const unsubscribe = sdk.on('disconnected', () => {
+            unsubscribe();
+            resolve();
+          });
+        });
+        sdk.endSession();
+        await disconnected;
+      }
+
+      setLocalMessages([]);
+      setInput('');
+      await sdk.connect();
+      if (!sdk.getSessionId() || sdk.getSessionId() === previousSessionId) {
+        throw new Error('The runtime did not create a new session. Please try again.');
+      }
+    } catch (error) {
+      setSessionError(
+        `Couldn't start a new chat: ${error instanceof Error ? error.message : String(error)}`
+      );
+    } finally {
+      setIsRestarting(false);
+    }
+  }
+
   return (
     <div className="page">
       <section className="hero">
@@ -97,14 +140,24 @@ export default function App() {
             <div className="header-info">
               <h2>JBL Assistant</h2>
               <span className={isConnected ? 'status online' : 'status'}>
-                {isConnected ? 'Online · replies instantly' : 'Connecting...'}
+                {isRestarting ? 'Starting a new chat...' : isConnected ? 'Online · replies instantly' : 'Connecting...'}
               </span>
             </div>
+            <button
+              className="refresh-btn"
+              onClick={startNewChat}
+              disabled={!sdk || isRestarting}
+              aria-label="Start a new chat"
+              title="Start a new chat"
+            >
+              ↻
+            </button>
             <button className="menu-btn" onClick={showMainMenu}>☰ Menu</button>
             <button className="close-btn" onClick={() => setOpen(false)}>✕</button>
           </header>
 
           <main className="chat-body">
+            {sessionError && <div className="session-error" role="alert">{sessionError}</div>}
             {allMessages.map((m) => (
               <MessageRender
                 key={m.id}

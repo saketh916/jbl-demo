@@ -6,7 +6,7 @@ export default function ArtemisConnection({ children }) {
       projectId={import.meta.env.VITE_ARTEMIS_PROJECT_ID}
       apiKey={import.meta.env.VITE_ARTEMIS_API_KEY}
       endpoint={import.meta.env.VITE_ARTEMIS_ENDPOINT}
-      debug={true}
+      debug={false}
     >
       {children}
     </AgentProvider>
